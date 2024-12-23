@@ -14,8 +14,7 @@ import (
 	"strings"
 )
 
-const botToken = "7814917772:AAGOcQA8Qyml8fmgqcy16bBpe8p6fhAaY8E"
-const telegramAPI = "https://api.telegram.org/bot" + botToken
+var telegramAPI string
 
 type Update struct {
 	UpdateID int      `json:"update_id"`
@@ -56,6 +55,13 @@ type Result struct {
 }
 
 func InitTelegramBot() {
+
+	botToken := os.Getenv("BOT_TOKEN")
+	if botToken == "" {
+		log.Fatal("BOT_TOKEN environment variable is not set")
+	}
+	telegramAPI = "https://api.telegram.org/bot" + botToken
+
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	err := setWebhook(webhookURL)
 	if err != nil {
@@ -67,7 +73,7 @@ func InitTelegramBot() {
 	Port := os.Getenv("PORT")
 
 	log.Printf("Starting the server on port %s", Port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", Port), nil))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
