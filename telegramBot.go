@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var telegramAPI string
@@ -103,12 +105,13 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendMessage(chatID int, text string) error {
-	escapedText := EscapeMarkdownV2(text)
+	// escapedText := EscapeMarkdownV2(text)
+	htmlText := convertToTelegramHTML(text)
 
 	reqBody := SendMessageRequest{
 		ChatID:    chatID,
-		Text:      escapedText,
-		ParseMode: "MarkdownV2",
+		Text:      htmlText,
+		ParseMode: "HTML",
 	}
 	reqBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -323,59 +326,96 @@ func updateMessage(chatID int64, messageID int, text string) error {
 	return nil
 }
 
-func EscapeMarkdownV2(text string) string {
-	var specialChars = []rune{'_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'}
-	var escapedText strings.Builder
-
-	for i, r := range text {
-		escape := false
-		for _, sc := range specialChars {
-			if r == sc {
-				// Check if this special character is part of a formatting sequence
-				isFormatting := false
-				switch r {
-				case '*':
-					if (i > 0 && text[i-1] == '*') || (i+1 < len(text) && text[i+1] == '*') {
-						isFormatting = true
-					}
-				case '_':
-					if (i > 0 && text[i-1] == '_') || (i+1 < len(text) && text[i+1] == '_') {
-						isFormatting = true
-					}
-				case '~':
-					if (i > 0 && text[i-1] == '~') || (i+1 < len(text) && text[i+1] == '~') {
-						isFormatting = true
-					}
-				case '`':
-					// Single backtick is for inline code, don't escape
-					isFormatting = true
-				case '[':
-					// Could be start of link or mention, don't escape yet
-					isFormatting = true
-				case ']':
-					// Could be end of link or mention, don't escape yet
-					isFormatting = true
-				case '(':
-					// Could be start of link or mention, don't escape yet
-					isFormatting = true
-				case ')':
-					// Could be end of link or mention, don't escape yet
-					isFormatting = true
-				case '|':
-					if (i > 0 && text[i-1] == '|') || (i+1 < len(text) && text[i+1] == '|') {
-						isFormatting = true
-					}
-				}
-				if !isFormatting {
-					escape = true
-				}
-				break
-			}
-		}
-		if escape {
-			escapedText.WriteString("\\")
-		}
-		escapedText.WriteRune(r)
+var (
+	patterns = []struct {
+		regex *regexp.Regexp
+		html  interface{}
+	}{
+		{regexp.MustCompile("(?s)```([a-zA-Z]*)\n(.*?)\n```"), nil}, // Will be initialized with function
+		{regexp.MustCompile("`([^`]+)`"), "<code>$1</code>"},
+		{regexp.MustCompile(`\*\*(.*?)\*\*`), "<b>$1</b>"},
+		{regexp.MustCompile(`__(.*?)__`), "<u>$1</u>"},
+		{regexp.MustCompile(`_(.*?)_`), "<i>$1</i>"},
+		{regexp.MustCompile(`~~(.*?)~~`), "<s>$1</s>"},
+		{regexp.MustCompile(`\|\|(.*?)\|\|`), "<tg-spoiler>$1</tg-spoiler>"},
+		{regexp.MustCompile(`\[(.*?)\]\((.*?)\)`), "<a href=\"$2\">$1</a>"},
+		{regexp.MustCompile(`(?m)^\*\s+(.*)`), "• $1"}, // ?m -> makes `^` work per line not just start and end of the input
 	}
-	return escapedText.String()
+
+	multipleNewlines = regexp.MustCompile(`\n{3,}`)
+	lineSpaces       = regexp.MustCompile(`(?m)^[ \t]+|[ \t]+$`)
+
+	builderPool = sync.Pool{
+		New: func() interface{} {
+			return new(strings.Builder)
+		},
+	}
+)
+
+func init() {
+	patterns[0].html = func(matches []string) string {
+		if len(matches) < 3 {
+			return matches[0]
+		}
+		code := strings.TrimSpace(matches[2])
+		return fmt.Sprintf("<pre><code>%s</code></pre>", code)
+	}
+}
+
+func convertToTelegramHTML(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	builder := builderPool.Get().(*strings.Builder)
+	builder.Reset()
+	defer builderPool.Put(builder)
+
+	builder.Grow(len(text) * 2)
+
+	text = escapeUserInputForHTML(text)
+
+	for _, pattern := range patterns {
+		switch replacement := pattern.html.(type) {
+		case string:
+			text = pattern.regex.ReplaceAllString(text, replacement)
+		case func([]string) string:
+			text = pattern.regex.ReplaceAllStringFunc(text, func(match string) string {
+				groups := pattern.regex.FindStringSubmatch(match)
+				return replacement(groups)
+			})
+		}
+	}
+
+	text = cleanupText(text)
+
+	return text
+}
+
+func escapeUserInputForHTML(text string) string {
+	builder := builderPool.Get().(*strings.Builder)
+	builder.Reset()
+	builder.Grow(len(text) + len(text)/4)
+	defer builderPool.Put(builder)
+
+	for _, r := range text {
+		switch r {
+		case '&':
+			builder.WriteString("&amp;")
+		case '<':
+			builder.WriteString("&lt;")
+		case '>':
+			builder.WriteString("&gt;")
+		default:
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
+
+func cleanupText(text string) string {
+	text = multipleNewlines.ReplaceAllString(text, "\n\n")
+	text = lineSpaces.ReplaceAllString(text, "")
+	return strings.TrimSpace(text)
 }
