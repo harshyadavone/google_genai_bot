@@ -89,6 +89,36 @@ func TestConvertToTelegramHTML(t *testing.T) {
 			expected: "Line1\n\nLine2",
 		},
 		{
+			name:     "Code block without newlines",
+			input:    "```const x = 1;```",
+			expected: "<pre><code>const x = 1;</code></pre>",
+		},
+		{
+			name:     "Code block with multiple lines",
+			input:    "```\nline1\nline2\nline3\n```",
+			expected: "<pre><code>line1\nline2\nline3</code></pre>",
+		},
+		{
+			name:     "Code block with language and no initial newline",
+			input:    "```goprintln('Hello')```",
+			expected: "<pre><code>println('Hello')</code></pre>",
+		},
+		{
+			name:     "Empty code block",
+			input:    "```\n```",
+			expected: "",
+		},
+		{
+			name:     "Code block with spaces",
+			input:    "```   \ncode\n   ```",
+			expected: "<pre><code>code</code></pre>",
+		},
+		{
+			name:     "Nested formatting in code block",
+			input:    "```\n**bold** _italic_\n```",
+			expected: "<pre><code>**bold** _italic_</code></pre>",
+		},
+		{
 			name: "Complex example",
 			input: `* **Bold item**
 * _Italic item_
