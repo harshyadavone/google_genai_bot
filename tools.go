@@ -22,20 +22,20 @@ func getTool(name string) (func(ctx context.Context, args genai.FunctionCall) (s
 
 var tools = &genai.Tool{
 	FunctionDeclarations: []*genai.FunctionDeclaration{
-		{
-			Name:        "read_file",
-			Description: "Read content from a file",
-			Parameters: &genai.Schema{
-				Type: genai.TypeObject,
-				Properties: map[string]*genai.Schema{
-					"file_name": {
-						Type:        genai.TypeString,
-						Description: "Name of the file to read",
-					},
-				},
-				Required: []string{"file_name"},
-			},
-		},
+		// {
+		// 	Name:        "read_file",
+		// 	Description: "Read content from a file",
+		// 	Parameters: &genai.Schema{
+		// 		Type: genai.TypeObject,
+		// 		Properties: map[string]*genai.Schema{
+		// 			"file_name": {
+		// 				Type:        genai.TypeString,
+		// 				Description: "Name of the file to read",
+		// 			},
+		// 		},
+		// 		Required: []string{"file_name"},
+		// 	},
+		// },
 		{
 			Name:        "create_file",
 			Description: "Creates a file for given content and filename",
