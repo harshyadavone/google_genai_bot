@@ -23,4 +23,8 @@ func main() {
 	}
 
 	InitTelegramBot()
+
+	cleanup := NewCleanupService("synapse_files")
+	cleanup.Start()
+	defer cleanup.Stop()
 }
