@@ -10,6 +10,7 @@ import (
 var availableTools = map[string]func(ctx context.Context, args genai.FunctionCall) (string, error){
 	"create_file": createFile,
 	"read_file":   readFile,
+	"web_search":  webSearch,
 }
 
 func getTool(name string) (func(ctx context.Context, args genai.FunctionCall) (string, error), error) {
@@ -52,6 +53,20 @@ var tools = &genai.Tool{
 					},
 				},
 				Required: []string{"file_name", "file_content"},
+			},
+		},
+		{
+			Name:        "web_search",
+			Description: "Search on web and returns top search results",
+			Parameters: &genai.Schema{
+				Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{
+					"query": {
+						Type:        genai.TypeString,
+						Description: "query to search on web",
+					},
+				},
+				Required: []string{"query"},
 			},
 		},
 	},
