@@ -52,7 +52,7 @@ func handleGenAI(userMessage string, chatID int) {
 	chatHistory.AddMessage("user", genai.Text(userMessage))
 
 	// Last n (15) messages for context
-	lastMessages, err := chatHistory.GetLastNMessages(15)
+	lastMessages, err := chatHistory.GetLastMessages()
 	if err != nil {
 		log.Println("Error getting last messages:", err)
 	}

@@ -1,27 +1,39 @@
 package main
 
 import (
-	"github.com/google/generative-ai-go/genai"
+	"fmt"
 	"sync"
+	"time"
+
+	"github.com/google/generative-ai-go/genai"
 )
 
-// Conversation represents a single turn in the conversation.
 type Conversation struct {
 	Role  string       `json:"role"`
 	Parts []genai.Part `json:"parts"`
 }
 
-// ChatHistory holds the conversation history for a specific chatId.
 type ChatHistory struct {
-	ChatID  int            `json:"chatId"`
-	History []Conversation `json:"history"`
+	ChatID     int       `json:"chat_id"`
+	TimeStamps time.Time `json:"time_stamps"`
+
 	mu      sync.Mutex
+	History []Conversation `json:"history"`
 }
 
-// Global map to store chat histories, keyed by chatId.
-var chatHistories = make(map[int]*ChatHistory)
+var (
+	chatHistories  sync.Map
+	maxHistorySize = 15
+)
 
-// AddMessage appends a new message (user or AI) to the conversation history.
+func (ch *ChatHistory) trimHistory() {
+	if len(ch.History) > maxHistorySize {
+		newHistory := make([]Conversation, maxHistorySize)
+		copy(newHistory, ch.History[len(ch.History)-maxHistorySize:])
+		ch.History = newHistory
+	}
+}
+
 func (ch *ChatHistory) AddMessage(role string, parts ...genai.Part) {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
@@ -30,62 +42,69 @@ func (ch *ChatHistory) AddMessage(role string, parts ...genai.Part) {
 		Role:  role,
 		Parts: parts,
 	})
+
+	ch.trimHistory()
 }
 
-// AddFunctionCall adds a function call to the conversation history.
 func (ch *ChatHistory) AddFunctionCall(call *genai.FunctionCall) {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 
 	ch.History = append(ch.History, Conversation{
-		Role:  "model", // Function calls are from the model
+		Role:  "model",
 		Parts: []genai.Part{call},
 	})
+
+	ch.trimHistory()
 }
 
-// AddFunctionResponse adds a function response to the conversation history.
 func (ch *ChatHistory) AddFunctionResponse(response *genai.FunctionResponse) {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 
 	ch.History = append(ch.History, Conversation{
-		Role:  "function", // ? Function responses have the role "function"
+		Role:  "function",
 		Parts: []genai.Part{response},
 	})
+
+	ch.trimHistory()
 }
 
-// GetLastNMessages retrieves the last n messages from the conversation history.
-func (ch *ChatHistory) GetLastNMessages(n int) ([]*genai.Content, error) {
+func (ch *ChatHistory) GetLastMessages() ([]*genai.Content, error) {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 
-	lenHistory := len(ch.History)
-	startIndex := 0
-	if lenHistory > n {
-		startIndex = lenHistory - n
+	if len(ch.History) == 0 {
+		return nil, fmt.Errorf("no message available")
 	}
 
-	var messages []*genai.Content
-	for i := startIndex; i < lenHistory; i++ {
+	// var messages []*genai.Content
+	messages := make([]*genai.Content, 0, len(ch.History))
+	for _, v := range ch.History {
 		messages = append(messages, &genai.Content{
-			Parts: ch.History[i].Parts,
-			Role:  ch.History[i].Role,
+			Parts: v.Parts,
+			Role:  v.Role,
 		})
 	}
 
 	return messages, nil
 }
 
-// getOrCreateChatHistory retrieves the ChatHistory for a given chatId.
-// If the chatId doesn't exist, it creates a new, empty ChatHistory.
 func getOrCreateChatHistory(chatId int) *ChatHistory {
-	history, ok := chatHistories[chatId]
-	if !ok {
-		history = &ChatHistory{
-			ChatID:  chatId,
-			History: []Conversation{},
-		}
-		chatHistories[chatId] = history
+
+	if history, ok := chatHistories.Load(chatId); ok {
+		return history.(*ChatHistory)
 	}
-	return history
+
+	newHistory := &ChatHistory{
+		ChatID:  chatId,
+		History: []Conversation{},
+	}
+
+	actual, loaded := chatHistories.LoadOrStore(chatId, newHistory)
+	if loaded {
+		return actual.(*ChatHistory)
+	}
+
+	return newHistory
 }
