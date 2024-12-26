@@ -38,7 +38,7 @@ func init() {
 		if len(matches) < 3 {
 			return matches[0]
 		}
-		code := strings.TrimSpace(matches[2])
+		code := matches[2]
 		if code == "" {
 			return ""
 		}
@@ -71,7 +71,7 @@ func convertToTelegramHTML(text string) string {
 		}
 	}
 
-	text = cleanupText(text)
+	// text = cleanupText(text)
 
 	return text
 }
@@ -98,8 +98,8 @@ func escapeUserInputForHTML(text string) string {
 	return builder.String()
 }
 
-func cleanupText(text string) string {
-	text = multipleNewlines.ReplaceAllString(text, "\n\n")
-	text = lineSpaces.ReplaceAllString(text, "")
-	return strings.TrimSpace(text)
-}
+// func cleanupText(text string) string {
+// 	text = multipleNewlines.ReplaceAllString(text, "\n\n")
+// 	text = lineSpaces.ReplaceAllString(text, "")
+// 	return strings.TrimSpace(text)
+// }

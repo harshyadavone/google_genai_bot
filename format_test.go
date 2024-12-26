@@ -178,44 +178,44 @@ func TestEscapeUserInputForHTML(t *testing.T) {
 	}
 }
 
-func TestCleanupText(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "Normal text",
-			input:    "Hello world",
-			expected: "Hello world",
-		},
-		{
-			name:     "Multiple newlines",
-			input:    "Line1\n\n\n\nLine2",
-			expected: "Line1\n\nLine2",
-		},
-		{
-			name:     "Trim spaces",
-			input:    "  Hello  \n  World  ",
-			expected: "Hello\nWorld",
-		},
-		{
-			name:     "Mixed whitespace",
-			input:    " \t Hello \t \n \t World \t ",
-			expected: "Hello\nWorld",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := cleanupText(tt.input)
-			if result != tt.expected {
-				t.Errorf("\nInput: %s\nExpected: %s\nGot: %s",
-					tt.input, tt.expected, result)
-			}
-		})
-	}
-}
+// func TestCleanupText(t *testing.T) {
+// 	tests := []struct {
+// 		name     string
+// 		input    string
+// 		expected string
+// 	}{
+// 		{
+// 			name:     "Normal text",
+// 			input:    "Hello world",
+// 			expected: "Hello world",
+// 		},
+// 		{
+// 			name:     "Multiple newlines",
+// 			input:    "Line1\n\n\n\nLine2",
+// 			expected: "Line1\n\nLine2",
+// 		},
+// 		{
+// 			name:     "Trim spaces",
+// 			input:    "  Hello  \n  World  ",
+// 			expected: "Hello\nWorld",
+// 		},
+// 		{
+// 			name:     "Mixed whitespace",
+// 			input:    " \t Hello \t \n \t World \t ",
+// 			expected: "Hello\nWorld",
+// 		},
+// 	}
+//
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			result := cleanupText(tt.input)
+// 			if result != tt.expected {
+// 				t.Errorf("\nInput: %s\nExpected: %s\nGot: %s",
+// 					tt.input, tt.expected, result)
+// 			}
+// 		})
+// 	}
+// }
 
 func BenchmarkConvertToTelegramHTML(b *testing.B) {
 	// Different test cases for benchmarking
@@ -277,13 +277,13 @@ func BenchmarkEscapeUserInputForHTML(b *testing.B) {
 	}
 }
 
-func BenchmarkCleanupText(b *testing.B) {
-	text := "Line 1\n\n\n\nLine 2  \n  Line 3  \n\n\n\nLine 4"
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cleanupText(text)
-	}
-}
+// func BenchmarkCleanupText(b *testing.B) {
+// 	text := "Line 1\n\n\n\nLine 2  \n  Line 3  \n\n\n\nLine 4"
+// 	b.ResetTimer()
+// 	for i := 0; i < b.N; i++ {
+// 		cleanupText(text)
+// 	}
+// }
 
 // Benchmark with different input sizes
 func BenchmarkConvertToTelegramHTML_InputSize(b *testing.B) {
