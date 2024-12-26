@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"sync"
-	// "time"
+	"time"
 
 	"github.com/google/generative-ai-go/genai"
 )
@@ -14,8 +14,8 @@ type Conversation struct {
 }
 
 type ChatHistory struct {
-	ChatID int `json:"chat_id"`
-	// TimeStamps time.Time `json:"time_stamps"`
+	ChatID     int       `json:"chat_id"`
+	TimeStamps time.Time `json:"time_stamps"`
 
 	mu      sync.Mutex
 	History []Conversation `json:"history"`
@@ -78,7 +78,6 @@ func (ch *ChatHistory) GetLastMessages() ([]*genai.Content, error) {
 		return nil, fmt.Errorf("no message available")
 	}
 
-	// var messages []*genai.Content
 	messages := make([]*genai.Content, 0, len(ch.History))
 	for _, v := range ch.History {
 		messages = append(messages, &genai.Content{
@@ -93,17 +92,26 @@ func (ch *ChatHistory) GetLastMessages() ([]*genai.Content, error) {
 func getOrCreateChatHistory(chatId int) *ChatHistory {
 
 	if history, ok := chatHistories.Load(chatId); ok {
-		return history.(*ChatHistory)
+		historyWithTimeStapms := history.(*ChatHistory)
+		historyWithTimeStapms.mu.Lock()
+		historyWithTimeStapms.TimeStamps = time.Now()
+		historyWithTimeStapms.mu.Unlock()
+		return historyWithTimeStapms
 	}
 
 	newHistory := &ChatHistory{
-		ChatID:  chatId,
-		History: []Conversation{},
+		ChatID:     chatId,
+		History:    []Conversation{},
+		TimeStamps: time.Now(),
 	}
 
 	actual, loaded := chatHistories.LoadOrStore(chatId, newHistory)
 	if loaded {
-		return actual.(*ChatHistory)
+		historyWithTimeStapms := actual.(*ChatHistory)
+		historyWithTimeStapms.mu.Lock()
+		historyWithTimeStapms.TimeStamps = time.Now()
+		historyWithTimeStapms.mu.Unlock()
+		return historyWithTimeStapms
 	}
 
 	return newHistory
