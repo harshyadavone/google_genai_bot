@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"sync"
-	"time"
+	// "time"
 
 	"github.com/google/generative-ai-go/genai"
 )
@@ -14,8 +14,8 @@ type Conversation struct {
 }
 
 type ChatHistory struct {
-	ChatID     int       `json:"chat_id"`
-	TimeStamps time.Time `json:"time_stamps"`
+	ChatID int `json:"chat_id"`
+	// TimeStamps time.Time `json:"time_stamps"`
 
 	mu      sync.Mutex
 	History []Conversation `json:"history"`
