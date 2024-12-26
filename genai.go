@@ -11,7 +11,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-func handleGenAI(userMessage string, chatID int) {
+func handleGenAI(userMessage string, chatID int, updateMessage func(updatedMessage string)) {
 
 	ctx := context.Background()
 
@@ -65,10 +65,10 @@ func handleGenAI(userMessage string, chatID int) {
 		log.Fatalf("Error sending message: %v", err)
 	}
 
-	handleResponse(ctx, cs, res, chatID)
+	handleResponse(ctx, cs, res, chatID, updateMessage)
 }
 
-func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.GenerateContentResponse, userId int) {
+func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.GenerateContentResponse, userId int, updateMessage func(updatedMessage string)) {
 	if resp == nil {
 		return
 	}
@@ -88,9 +88,10 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 
 					history.AddMessage("model", v)
 
-					if err := sendMessage(userId, text); err != nil {
-						log.Println("Error sending message to Telegram:", err)
-					}
+					// if err := sendMessage(userId, text); err != nil {
+					// 	log.Println("Error sending message to Telegram:", err)
+					// }
+					updateMessage(text)
 				}
 
 			case genai.FunctionCall:
@@ -99,7 +100,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				toolFunc, err := getTool(v.Name)
 				if err != nil {
 					log.Printf("Error retrieving tool: %v\n", err)
-					sendToolError(ctx, cs, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), userId)
+					sendToolError(ctx, cs, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), userId, updateMessage)
 					continue
 				}
 
@@ -108,7 +109,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				result, err := toolFunc(ctx, v)
 				if err != nil {
 					log.Printf("Error executing tool '%s': %v\n", v.Name, err)
-					sendToolError(ctx, cs, v.Name, err.Error(), userId)
+					sendToolError(ctx, cs, v.Name, err.Error(), userId, updateMessage)
 					continue
 				}
 
@@ -139,7 +140,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				}
 
 				if hasNonEmptyContent(nextResp) {
-					handleResponse(ctx, cs, nextResp, userId)
+					handleResponse(ctx, cs, nextResp, userId, updateMessage)
 				}
 
 			default:
@@ -149,7 +150,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 	}
 }
 
-func sendToolError(ctx context.Context, cs *genai.ChatSession, toolName, errorMsg string, userId int) {
+func sendToolError(ctx context.Context, cs *genai.ChatSession, toolName, errorMsg string, userId int, updateMessage func(updateMessage string)) {
 	resp, err := cs.SendMessage(ctx, genai.FunctionResponse{
 		Name: toolName,
 		Response: map[string]any{
@@ -157,6 +158,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, toolName, errorMs
 		},
 	})
 
+	updateMessage(errorMsg)
 	history := getOrCreateChatHistory(userId)
 
 	history.AddFunctionResponse(&genai.FunctionResponse{
@@ -171,7 +173,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, toolName, errorMs
 		return
 	}
 
-	handleResponse(ctx, cs, resp, userId)
+	handleResponse(ctx, cs, resp, userId, updateMessage)
 }
 
 // Print the response

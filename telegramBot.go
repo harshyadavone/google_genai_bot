@@ -96,13 +96,17 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if update.Message != nil {
 		chatID := update.Message.Chat.ID
 		text := update.Message.Text
-		handleGenAI(text, chatID)
+		// 💫
+		updateMessage, err := sendLoadingMessage(chatID, "⏳")
+		if err != nil {
+			log.Println("Error sending message to Telegram:", err)
+		}
+		handleGenAI(text, chatID, updateMessage)
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
 func sendMessage(chatID int, text string) error {
-	// escapedText := EscapeMarkdownV2(text)
 	htmlText := convertToTelegramHTML(text)
 
 	reqBody := SendMessageRequest{
@@ -142,27 +146,29 @@ func setWebhook(webhookURL string) error {
 	return nil
 }
 
-func sendLoadingMessage(chatID int64, text string) (func(), error) {
+func sendLoadingMessage(chatID int, text string) (func(updatedText string), error) {
 	msg, err := sendMessageAndGetID(chatID, text)
 	if err != nil {
 		return nil, err
 	}
 
-	return func() {
-		err := deleteMessage(chatID, msg.MessageID)
+	return func(updatedText string) {
+		err := updateMessage(chatID, msg.MessageID, updatedText)
 		if err != nil {
 			log.Printf("Error updating message: %v", err)
 		}
 	}, nil
 }
 
-func sendMessageAndGetID(chatID int64, text string) (*Message, error) {
+func sendMessageAndGetID(chatID int, text string) (*Message, error) {
 	url := fmt.Sprintf("%s/sendMessage", telegramAPI)
 
-	payload := map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       text,
-		"parse_mode": "MarkdownV2",
+	htmlText := convertToTelegramHTML(text)
+
+	payload := SendMessageRequest{
+		ChatID:    chatID,
+		Text:      htmlText,
+		ParseMode: "HTML",
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -272,19 +278,19 @@ func sendFileWithProgress(chatID int, filePath string) error {
 		return fmt.Errorf("invalid file path")
 	}
 
-	msg, err := sendMessageAndGetID(int64(chatID), "Preparing your file...")
+	msg, err := sendMessageAndGetID(chatID, "Preparing your file...")
 	if err != nil {
 		return fmt.Errorf("error sending initial message: %v", err)
 	}
 
-	err = updateMessage(int64(chatID), msg.MessageID, "Uploading file...")
+	err = updateMessage(chatID, msg.MessageID, "Uploading file...")
 	if err != nil {
 		log.Printf("Error updating progress message: %v", err)
 	}
 
 	err = sendDocument(chatID, filePath)
 	if err != nil {
-		updateMessage(int64(chatID), msg.MessageID, "Error sending file!")
+		updateMessage(chatID, msg.MessageID, "Error sending file!")
 		return fmt.Errorf("error sending document: %v", err)
 	}
 
@@ -296,13 +302,15 @@ func sendFileWithProgress(chatID int, filePath string) error {
 	return nil
 }
 
-func updateMessage(chatID int64, messageID int, text string) error {
+func updateMessage(chatID int, messageID int, text string) error {
 	url := fmt.Sprintf("%s/editMessageText", telegramAPI)
 
+	htmlText := convertToTelegramHTML(text)
 	payload := map[string]interface{}{
 		"chat_id":    chatID,
 		"message_id": messageID,
-		"text":       text,
+		"text":       htmlText,
+		"parse_mode": "HTML",
 	}
 
 	jsonData, err := json.Marshal(payload)
