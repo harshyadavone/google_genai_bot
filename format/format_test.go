@@ -1,4 +1,4 @@
-package main
+package format
 
 import (
 	"fmt"
@@ -135,7 +135,7 @@ func TestConvertToTelegramHTML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := convertToTelegramHTML(tt.input)
+			result := ConvertToTelegramHTML(tt.input)
 			if result != tt.expected {
 				t.Errorf("\nInput:\n%s\nExpected:\n%s\nGot:\n%s",
 					tt.input, tt.expected, result)
@@ -262,7 +262,7 @@ func BenchmarkConvertToTelegramHTML(b *testing.B) {
 
 			// Run the conversion b.N times
 			for i := 0; i < b.N; i++ {
-				convertToTelegramHTML(tc.text)
+				ConvertToTelegramHTML(tc.text)
 			}
 		})
 	}
@@ -296,7 +296,7 @@ func BenchmarkConvertToTelegramHTML_InputSize(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				convertToTelegramHTML(text)
+				ConvertToTelegramHTML(text)
 			}
 		})
 	}
@@ -334,6 +334,6 @@ func BenchmarkConvertToTelegramHTML_Allocs(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		convertToTelegramHTML(text)
+		ConvertToTelegramHTML(text)
 	}
 }

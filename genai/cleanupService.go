@@ -1,4 +1,4 @@
-package main
+package genai
 
 import (
 	"context"
@@ -116,3 +116,4 @@ func (cs *CleanupService) Stop() {
 		cs.isRunning = false
 	}
 }
+

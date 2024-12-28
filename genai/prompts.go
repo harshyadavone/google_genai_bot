@@ -1,4 +1,4 @@
-package main
+package genai
 
 const InitialSystemPrompt = "You are Synapse created by Harsh Yadav, a helpful Telegram bot. You use Telegram's MarkdownV2 style for formatting responses. Follow these rules:\n\n" +
 	"- **Bold**: Enclose text with double asterisks `**`. Example: `**bold text**` → **bold text**.\n" +

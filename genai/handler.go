@@ -1,4 +1,4 @@
-package main
+package genai
 
 import (
 	"context"
@@ -11,7 +11,22 @@ import (
 	"google.golang.org/api/option"
 )
 
-func handleGenAI(userMessage string, chatID int, updateMessage func(updatedMessage string)) {
+type Handler struct {
+	bot TelegramBot
+}
+
+type TelegramBot interface {
+	SendMessage(chatID int, text string) error
+	SendFileWithProgress(chatID int, filepath string) error
+}
+
+func NewHandler(bot TelegramBot) *Handler {
+	return &Handler{
+		bot: bot,
+	}
+}
+
+func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage func(updatedMessage string)) {
 
 	ctx := context.Background()
 
@@ -22,6 +37,13 @@ func handleGenAI(userMessage string, chatID int, updateMessage func(updatedMessa
 		log.Fatalf("Failed to initialize Gemini client: %v", err)
 	}
 	defer client.Close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in HandleMessage: %v", r)
+			updateMessage("Sorry, an error occurred while processing your message.")
+		}
+	}()
 
 	model := client.GenerativeModel("gemini-2.0-flash-exp")
 	model.SystemInstruction = genai.NewUserContent(genai.Text(InitialSystemPrompt))
@@ -65,10 +87,10 @@ func handleGenAI(userMessage string, chatID int, updateMessage func(updatedMessa
 		log.Fatalf("Error sending message: %v", err)
 	}
 
-	handleResponse(ctx, cs, res, chatID, updateMessage)
+	handleResponse(ctx, cs, h.bot, res, chatID, updateMessage)
 }
 
-func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.GenerateContentResponse, userId int, updateMessage func(updatedMessage string)) {
+func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, resp *genai.GenerateContentResponse, userId int, updateMessage func(updatedMessage string)) {
 	if resp == nil {
 		return
 	}
@@ -83,14 +105,8 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 			case genai.Text:
 				if text := strings.TrimSpace(string(v)); text != "" {
 					fmt.Printf("1. Gemini: %s\n", text)
-
 					history := getOrCreateChatHistory(userId)
-
 					history.AddMessage("model", v)
-
-					// if err := sendMessage(userId, text); err != nil {
-					// 	log.Println("Error sending message to Telegram:", err)
-					// }
 					updateMessage(text)
 				}
 
@@ -100,7 +116,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				toolFunc, err := getTool(v.Name)
 				if err != nil {
 					log.Printf("Error retrieving tool: %v\n", err)
-					sendToolError(ctx, cs, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), userId, updateMessage)
+					sendToolError(ctx, cs, bot, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), userId, updateMessage)
 					continue
 				}
 
@@ -109,7 +125,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				result, err := toolFunc(ctx, v)
 				if err != nil {
 					log.Printf("Error executing tool '%s': %v\n", v.Name, err)
-					sendToolError(ctx, cs, v.Name, err.Error(), userId, updateMessage)
+					sendToolError(ctx, cs, bot, v.Name, err.Error(), userId, updateMessage)
 					continue
 				}
 
@@ -118,7 +134,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				// WARN: update it...
 				if strings.HasPrefix(result, "File created successfully at") {
 					filePath := strings.TrimPrefix(result, "File created successfully at ")
-					err = sendFileWithProgress(userId, filePath)
+					err = bot.SendFileWithProgress(userId, filePath)
 					if err != nil {
 						log.Printf("Error sending file: %v\n", err)
 					}
@@ -140,7 +156,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 				}
 
 				if hasNonEmptyContent(nextResp) {
-					handleResponse(ctx, cs, nextResp, userId, updateMessage)
+					handleResponse(ctx, cs, bot, nextResp, userId, updateMessage)
 				}
 
 			default:
@@ -150,7 +166,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, resp *genai.Gene
 	}
 }
 
-func sendToolError(ctx context.Context, cs *genai.ChatSession, toolName, errorMsg string, userId int, updateMessage func(updateMessage string)) {
+func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, toolName, errorMsg string, userId int, updateMessage func(updateMessage string)) {
 	resp, err := cs.SendMessage(ctx, genai.FunctionResponse{
 		Name: toolName,
 		Response: map[string]any{
@@ -173,7 +189,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, toolName, errorMs
 		return
 	}
 
-	handleResponse(ctx, cs, resp, userId, updateMessage)
+	handleResponse(ctx, cs, bot, resp, userId, updateMessage)
 }
 
 // Print the response

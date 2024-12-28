@@ -1,4 +1,4 @@
-package main
+package format
 
 import (
 	"fmt"
@@ -46,7 +46,7 @@ func init() {
 	}
 }
 
-func convertToTelegramHTML(text string) string {
+func ConvertToTelegramHTML(text string) string {
 	if text == "" {
 		return ""
 	}
