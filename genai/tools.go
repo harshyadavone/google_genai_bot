@@ -57,16 +57,20 @@ var tools = &genai.Tool{
 		},
 		{
 			Name:        "web_search",
-			Description: "Search on web and returns top search results",
+			Description: "Perform a web search and optionally extract data from top search results.",
 			Parameters: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
 					"query": {
 						Type:        genai.TypeString,
-						Description: "query to search on web",
+						Description: "The search query to execute on the web (returns top search results).",
+					},
+					"extract_websites": {
+						Type:        genai.TypeBoolean,
+						Description: "If true, data will be extracted from each top search result.",
 					},
 				},
-				Required: []string{"query"},
+				Required: []string{"query", "extract_websites"},
 			},
 		},
 	},
