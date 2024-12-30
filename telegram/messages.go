@@ -15,9 +15,11 @@ import (
 )
 
 func (b *Bot) SendMessage(chatID int, text string) error {
+
+	htmlText := format.ConvertToTelegramHTML(text)
 	reqBody := SendMessageRequest{
 		ChatID:    chatID,
-		Text:      text,
+		Text:      htmlText,
 		ParseMode: "HTML",
 	}
 

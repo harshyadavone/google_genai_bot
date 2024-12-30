@@ -6,10 +6,11 @@ type Update struct {
 }
 
 type Message struct {
-	MessageID int    `json:"message_id"`
-	From      User   `json:"from"`
-	Chat      Chat   `json:"chat"`
-	Text      string `json:"text"`
+	MessageID int      `json:"message_id"`
+	From      User     `json:"from"`
+	Chat      Chat     `json:"chat"`
+	Text      string   `json:"text"`
+	Entities  []Entity `json:"entities"`
 }
 
 type User struct {
@@ -21,6 +22,12 @@ type User struct {
 type Chat struct {
 	ID   int    `json:"id"`
 	Type string `json:"type"`
+}
+
+type Entity struct {
+	Offset int    `json:"offset"`
+	Length int    `json:"length"`
+	Type   string `json:"type"`
 }
 
 type SendMessageRequest struct {

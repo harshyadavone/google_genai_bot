@@ -43,15 +43,22 @@ func main() {
 		}
 
 		if update.Message != nil {
-			chatID := update.Message.Chat.ID
-			text := update.Message.Text
+			if len(update.Message.Entities) > 0 && update.Message.Entities[0].Type == "bot_command" {
+				bot.HandleCommands(update.Message.Chat.ID, update.Message.Text)
+			} else {
+				chatID := update.Message.Chat.ID
+				text := update.Message.Text
 
-			updateMessage, err := bot.SendLoadingMessage(chatID, "⏳")
-			if err != nil {
-				log.Println("Error sending loading message:", err)
+				log.Printf("ChatId: %d \nText: %s", chatID, text)
+
+				updateMessage, err := bot.SendLoadingMessage(chatID, "⏳")
+
+				if err != nil {
+					log.Println("Error sending loading message:", err)
+				}
+
+				go genAIHandler.HandleMessage(text, chatID, updateMessage)
 			}
-
-			go genAIHandler.HandleMessage(text, chatID, updateMessage)
 		}
 
 		w.WriteHeader(http.StatusOK)

@@ -4,8 +4,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"strings"
 )
+
+const helpGuide = `
+**🤖 Synapse Help Guide**
+
+Hi there! I'm **Synapse**, your versatile assistant. Here's what I can do for you:
+
+✨ **Features and Capabilities**
+
+	 **Create File**: Create new files ( For now, only **.txt** files are supported, other formats are coming soon! ).
+	 || **Read File**: Read file ( **Comming Soon** ). ||
+	 **Web Search**: Retrieve relevant information from the web.
+	 **Content Extraction**: Extract data from websites.
+
+**Need Help or Have Suggestions?**
+Feel free to reach out anytime via [@harsh](https://t.me/harsh_693).
+
+Type **/help** at anytime to revisit this guide!
+`
 
 type Bot struct {
 	Token      string
@@ -41,9 +61,23 @@ func (b *Bot) ParseUpdate(r *http.Request) (*Update, error) {
 	}
 	defer r.Body.Close()
 
+	log.Println(string(body))
+
 	var update Update
 	if err := json.Unmarshal(body, &update); err != nil {
 		return nil, err
 	}
 	return &update, nil
+}
+
+func (b *Bot) HandleCommands(chatId int, text string) error {
+	switch {
+	case text == "/start":
+		b.SendMessage(chatId, "Welcome to Synapse AI chat bot")
+	case text == "/help":
+		b.SendMessage(chatId, helpGuide)
+	case strings.HasPrefix(text, "/"):
+		b.SendMessage(chatId, "Not a vaild command. Type **/help** to see the list of available commands.")
+	}
+	return nil
 }
