@@ -26,7 +26,7 @@ type SearchResult struct {
 	Position int    `json:"position,omitempty"`
 }
 
-type WebsiteContent struct {
+type WebPageData struct {
 	URL         string `json:"url"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
@@ -35,10 +35,10 @@ type WebsiteContent struct {
 	Content     string `json:"content"`
 }
 
-const maxWorkers = 4
+const maxConcurrentScrapers = 4
 
 var (
-	httpClient = &http.Client{
+	webClient = &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 100,
@@ -51,7 +51,7 @@ var (
 		Timeout: 10 * time.Second,
 	}
 
-	selectors = []string{
+	contentSelectors = []string{
 		"article", "main", "#content",
 		".content", ".article-content",
 		".post-content", ".content p",
@@ -60,7 +60,7 @@ var (
 		"ul:not(nav ul)", "ol:not(nav ol)",
 	}
 
-	resultsPool = sync.Pool{
+	searchResultPool = sync.Pool{
 		New: func() any {
 			return make([]SearchResult, 0, 10)
 		},
@@ -72,9 +72,9 @@ var (
 		},
 	}
 
-	websiteContentPool = sync.Pool{
+	webPageDataPool = sync.Pool{
 		New: func() any {
-			return &WebsiteContent{}
+			return &WebPageData{}
 		},
 	}
 
@@ -106,7 +106,7 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
-	res, err := httpClient.Do(req)
+	res, err := webClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch results for query '%s' : %w", query, err)
 	}
@@ -123,9 +123,9 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 		return "", fmt.Errorf("error parsing document: %w", err)
 	}
 
-	results := resultsPool.Get().([]SearchResult)
+	results := searchResultPool.Get().([]SearchResult)
 	results = results[:0]
-	defer resultsPool.Put(results)
+	defer searchResultPool.Put(results)
 	doc.Find("div.g").Each(func(i int, s *goquery.Selection) {
 		title := strings.TrimSpace(s.Find("h3").First().Text())
 		link, exists := s.Find("a").First().Attr("href")
@@ -147,10 +147,10 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 
 	if extractWebsites {
 		var links []string
-		for _, v := range results {
+		for _, v := range results[:4] {
 			links = append(links, v.Link)
 		}
-		return extractWebsitesContent(links), nil
+		return scrapeWebsites(ctx, links), nil
 	}
 
 	buf := bufPool.Get().(*bytes.Buffer)
@@ -164,43 +164,68 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 	return buf.String(), nil
 }
 
-func extractWebsitesContent(links []string) string {
+func scrapeWebsites(ctx context.Context, links []string) string {
 
-	resultChan := make(chan *WebsiteContent, len(links))
-	results := make([]WebsiteContent, 0, len(links))
-	semaphore := make(chan struct{}, maxWorkers)
-	var wg sync.WaitGroup
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	resultChan := make(chan *WebPageData, len(links))
+	errChan := make(chan error, len(links))
+	results := make([]WebPageData, 0, len(links))
+	semaphore := make(chan struct{}, maxConcurrentScrapers)
+	var wg sync.WaitGroup
 
 	for _, link := range links {
 		wg.Add(1)
-		semaphore <- struct{}{}
-		go func(ctx context.Context, link string) {
-			defer wg.Done()
-			defer func() { <-semaphore }()
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("Recovered from panic processing %s: %v", link, r)
+		select {
+		case semaphore <- struct{}{}:
+			go func(link string) {
+				defer wg.Done()
+				defer func() { <-semaphore }()
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("Recovered from panic processing %s: %v", link, r)
+					}
+				}()
+
+				select {
+				case <-ctx.Done():
+					errChan <- ctx.Err()
+					return
+				default:
+					if data := scrapeWebPage(ctx, link); data != nil {
+						resultChan <- data
+					}
 				}
-			}()
 
-			extractedWebsiteContent := extractWebsiteContent(ctx, link)
-			resultChan <- extractedWebsiteContent
+			}(link)
 
-		}(ctx, link)
+		case <-ctx.Done():
+			wg.Done()
+			return "{}"
+		}
 	}
 
 	go func() {
 		wg.Wait()
 		close(resultChan)
+		close(errChan)
 	}()
 
-	for result := range resultChan {
-		results = append(results, *result)
+	for {
+		select {
+		case result, ok := <-resultChan:
+			if !ok {
+				goto DONE
+			}
+			if results != nil {
+				results = append(results, *result)
+			}
+		case <-ctx.Done():
+			return "{}"
+		}
 	}
 
+DONE:
 	resultsByte, err := json.Marshal(results)
 	if err != nil {
 		log.Println("Error in Marshaling the results: ", err)
@@ -257,13 +282,21 @@ func removeDuplicateContent(content string) string {
 	return builder.String()
 }
 
-func extractWebsiteContent(ctx context.Context, websiteLink string) *WebsiteContent {
-	websiteContent := websiteContentPool.Get().(*WebsiteContent)
-	*websiteContent = WebsiteContent{
+func processContent(content string, resultChan chan<- string) {
+	processed := removeDuplicateContent(content)
+	resultChan <- processed
+}
+
+func scrapeWebPage(ctx context.Context, websiteLink string) *WebPageData {
+	websiteContent := webPageDataPool.Get().(*WebPageData)
+	*websiteContent = WebPageData{
 		URL: websiteLink,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", websiteLink, nil)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(timeoutCtx, "GET", websiteLink, nil)
 	if err != nil {
 		fmt.Printf("error creating request: %v", err)
 		return websiteContent
@@ -273,7 +306,7 @@ func extractWebsiteContent(ctx context.Context, websiteLink string) *WebsiteCont
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
-	res, err := httpClient.Do(req)
+	res, err := webClient.Do(req)
 	if err != nil {
 		fmt.Println("Failed to send req: ", err)
 		return websiteContent
@@ -312,7 +345,7 @@ func extractWebsiteContent(ctx context.Context, websiteLink string) *WebsiteCont
 	websiteContent.Date = doc.Find("time").AttrOr("datetime", "")
 	websiteContent.Author = trimContent(doc.Find(`meta[name="author"]`).AttrOr("content", ""))
 
-	for _, selector := range selectors {
+	for _, selector := range contentSelectors {
 		doc.Find(selector).Each(func(i int, s *goquery.Selection) {
 			text := strings.TrimSpace(s.Text())
 			if text != "" {
@@ -322,6 +355,35 @@ func extractWebsiteContent(ctx context.Context, websiteLink string) *WebsiteCont
 		})
 	}
 
-	websiteContent.Content = removeDuplicateContent(builder.String())
+	contentChan := make(chan string)
+	go processContent(builder.String(), contentChan)
+
+	select {
+	case processContent := <-contentChan:
+		websiteContent.Content = processContent
+	case <-ctx.Done():
+		return websiteContent
+	case <-time.After(time.Second * 2):
+		return websiteContent
+	}
+
 	return websiteContent
+}
+
+func extractWebPagesContent(ctx context.Context, funCall genai.FunctionCall) (string, error) {
+	rawLinks, ok := funCall.Args["links"].([]any)
+	if !ok {
+		return "", fmt.Errorf("invalid or missing links argument")
+	}
+
+	links := make([]string, len(rawLinks))
+	for i, link := range rawLinks {
+		strLink, ok := link.(string)
+		if !ok {
+			return "", fmt.Errorf("invalid link at index %d, expected string", i)
+		}
+		links[i] = strLink
+	}
+
+	return scrapeWebsites(ctx, links), nil
 }

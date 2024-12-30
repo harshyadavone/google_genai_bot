@@ -8,9 +8,10 @@ import (
 )
 
 var availableTools = map[string]func(ctx context.Context, args genai.FunctionCall) (string, error){
-	"create_file": createFile,
-	"read_file":   readFile,
-	"web_search":  webSearch,
+	"create_file":      createFile,
+	"read_file":        readFile,
+	"web_search":       webSearch,
+	"extract_websites": extractWebPagesContent,
 }
 
 func getTool(name string) (func(ctx context.Context, args genai.FunctionCall) (string, error), error) {
@@ -71,6 +72,24 @@ var tools = &genai.Tool{
 					},
 				},
 				Required: []string{"query", "extract_websites"},
+			},
+		},
+		{
+			Name:        "extract_websites",
+			Description: "Extract data from given links.",
+			Parameters: &genai.Schema{
+				Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{
+					"links": {
+						Type:        genai.TypeArray,
+						Description: "An array of links from which data needs to be extracted.",
+						Items: &genai.Schema{
+							Type:        genai.TypeString,
+							Description: "link to scrape",
+						},
+					},
+				},
+				Required: []string{"links"},
 			},
 		},
 	},
