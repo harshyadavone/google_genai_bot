@@ -76,7 +76,7 @@ var tools = &genai.Tool{
 		},
 		{
 			Name:        "extract_websites",
-			Description: "Extract data from given links.",
+			Description: "Retrieve and extract relevant data from provided website links to address user queries effectively.",
 			Parameters: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
@@ -85,7 +85,7 @@ var tools = &genai.Tool{
 						Description: "An array of links from which data needs to be extracted.",
 						Items: &genai.Schema{
 							Type:        genai.TypeString,
-							Description: "link to scrape",
+							Description: "A link to scrape",
 						},
 					},
 				},
