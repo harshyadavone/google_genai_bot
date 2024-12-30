@@ -107,6 +107,7 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
 	res, err := webClient.Do(req)
+
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch results for query '%s' : %w", query, err)
 	}
@@ -147,9 +148,10 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 
 	if extractWebsites {
 		var links []string
-		for _, v := range results[:4] {
+		for _, v := range results {
 			links = append(links, v.Link)
 		}
+
 		return scrapeWebsites(ctx, links), nil
 	}
 
@@ -183,23 +185,28 @@ func scrapeWebsites(ctx context.Context, links []string) string {
 				defer func() { <-semaphore }()
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("Recovered from panic processing %s: %v", link, r)
+						logWithTime("Recovered from panic processing %s: %v", link, r)
 					}
 				}()
 
 				select {
 				case <-ctx.Done():
+					logWithTime("[scrapeWebsites] Context canceled or timeout reached for %s", link)
 					errChan <- ctx.Err()
 					return
 				default:
 					if data := scrapeWebPage(ctx, link); data != nil {
 						resultChan <- data
+					} else {
+						errChan <- fmt.Errorf("failed to scrape %s", link)
 					}
+
 				}
 
 			}(link)
 
 		case <-ctx.Done():
+			log.Println("[scrapeWebsites] Context canceled or timeout reached")
 			wg.Done()
 			return "{}"
 		}
@@ -215,20 +222,27 @@ func scrapeWebsites(ctx context.Context, links []string) string {
 		select {
 		case result, ok := <-resultChan:
 			if !ok {
+				log.Println("[scrapeWebsites] resultChan closed")
 				goto DONE
 			}
 			if results != nil {
 				results = append(results, *result)
 			}
 		case <-ctx.Done():
+			log.Println("[scrapeWebsites] Context canceled or timeout reached")
 			return "{}"
 		}
 	}
 
 DONE:
+
+	for err := range errChan {
+		log.Println("[scrapeWebsites] Error encountered:", err)
+	}
+
 	resultsByte, err := json.Marshal(results)
 	if err != nil {
-		log.Println("Error in Marshaling the results: ", err)
+		log.Println("[scrapeWebsites] Error marshaling the results:", err)
 		return "{}"
 	}
 
@@ -298,7 +312,7 @@ func scrapeWebPage(ctx context.Context, websiteLink string) *WebPageData {
 
 	req, err := http.NewRequestWithContext(timeoutCtx, "GET", websiteLink, nil)
 	if err != nil {
-		fmt.Printf("error creating request: %v", err)
+		logWithTime("[scrapeWebPage] Error creating request: %v", err)
 		return websiteContent
 	}
 
@@ -314,7 +328,7 @@ func scrapeWebPage(ctx context.Context, websiteLink string) *WebPageData {
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		fmt.Printf("received non-200 status code: %d", res.StatusCode)
+		logWithTime("[scrapeWebPage] Received non-200 status code: %d", res.StatusCode)
 		return websiteContent
 	}
 
@@ -324,15 +338,16 @@ func scrapeWebPage(ctx context.Context, websiteLink string) *WebPageData {
 	//
 	// _, err = io.CopyN(bodyBuf, res.Body, 10<<20) // 10 MB
 	// if err != nil && err != io.EOF {
-	// 	log.Printf("error reading response body: %v", err)
+	// 	logWithTime("error reading response body: %v", err)
 	// 	return websiteContent
 	// }
 
-	reader := io.LimitReader(res.Body, 10<<20) // 10 MB
+	reader := io.LimitReader(res.Body, 2<<20) // 10 MB
 
 	doc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
-		fmt.Printf("error parsing document: %v", err)
+		logWithTime("[scrapeWebPage] Error parsing document: %v", err)
+
 		return websiteContent
 	}
 
@@ -362,8 +377,7 @@ func scrapeWebPage(ctx context.Context, websiteLink string) *WebPageData {
 	case processContent := <-contentChan:
 		websiteContent.Content = processContent
 	case <-ctx.Done():
-		return websiteContent
-	case <-time.After(time.Second * 2):
+		logWithTime("[scrapeWebPage] Context canceled or timeout reached for website: %s", websiteLink)
 		return websiteContent
 	}
 
