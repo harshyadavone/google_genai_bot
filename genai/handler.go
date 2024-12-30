@@ -40,8 +40,7 @@ func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage fu
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic in HandleMessage: %v", r)
-			updateMessage("Sorry, an error occurred while processing your message.")
+			logWithTime("Recovered from panic in HandleMessage: %v", r)
 		}
 	}()
 
@@ -84,7 +83,9 @@ func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage fu
 	res, err := cs.SendMessage(ctx, genai.Text(userMessage))
 
 	if err != nil {
-		log.Fatalf("Error sending message: %v", err)
+		logWithTime("Error sending message: %v", err)
+		updateMessage("something went wrong!!!")
+		return
 	}
 
 	handleResponse(ctx, cs, h.bot, res, chatID, updateMessage)
@@ -115,7 +116,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 
 				toolFunc, err := getTool(v.Name)
 				if err != nil {
-					log.Printf("Error retrieving tool: %v\n", err)
+					logWithTime("Error retrieving tool: %v\n", err)
 					sendToolError(ctx, cs, bot, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), userId, updateMessage)
 					continue
 				}
@@ -124,19 +125,19 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 
 				result, err := toolFunc(ctx, v)
 				if err != nil {
-					log.Printf("Error executing tool '%s': %v\n", v.Name, err)
+					logWithTime("Error executing tool '%s': %v\n", v.Name, err)
 					sendToolError(ctx, cs, bot, v.Name, err.Error(), userId, updateMessage)
 					continue
 				}
 
-				fmt.Println("Function executed successfully:", result)
+				logWithTime("%s Function executed successfully", v.Name)
 
 				// WARN: update it...
 				if strings.HasPrefix(result, "File created successfully at") {
 					filePath := strings.TrimPrefix(result, "File created successfully at ")
 					err = bot.SendFileWithProgress(userId, filePath)
 					if err != nil {
-						log.Printf("Error sending file: %v\n", err)
+						logWithTime("Error sending file: %v\n", err)
 					}
 				}
 
@@ -151,7 +152,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				})
 
 				if err != nil {
-					log.Printf("Error sending function response first response's nextResp: %v", err)
+					logWithTime("Error sending function response first response's nextResp: %v", err)
 					continue
 				}
 
@@ -185,7 +186,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, 
 	})
 
 	if err != nil {
-		log.Printf("Error sending error response: %v", err)
+		logWithTime("Error sending error response: %v", err)
 		return
 	}
 
