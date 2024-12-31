@@ -84,7 +84,7 @@ func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage fu
 
 	if err != nil {
 		logWithTime("Error sending message: %v", err)
-		updateMessage("something went wrong!!!")
+		updateMessage("something went wrong!, please try again after sometime.")
 		return
 	}
 
@@ -111,18 +111,18 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 
 					if len(text) < 4096 {
 						updateMessage(text)
-					}else{
-					chunks := splitMessage(text, 4096)
-					if len(chunks) > 0 {
-						updateMessage(chunks[0])
-					}
+					} else {
+						chunks := splitMessage(text, 4096)
+						if len(chunks) > 0 {
+							updateMessage(chunks[0])
+						}
 
-					for i := 1; i < len(chunks); i++ {
-						if err := bot.SendMessage(chatId, chunks[i]); err != nil {
-							log.Printf("Error sending message chunk: %v", err)
+						for i := 1; i < len(chunks); i++ {
+							if err := bot.SendMessage(chatId, chunks[i]); err != nil {
+								log.Printf("Error sending message chunk: %v", err)
+							}
 						}
 					}
-				}
 
 				}
 
