@@ -108,7 +108,10 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 					fmt.Printf("1. Gemini: %s\n", text)
 					history := getOrCreateChatHistory(chatId)
 					history.AddMessage("model", v)
-					// this is the place where i have to handle max lenghth
+
+					if len(text) < 4096 {
+						updateMessage(text)
+					}else{
 					chunks := splitMessage(text, 4096)
 					if len(chunks) > 0 {
 						updateMessage(chunks[0])
@@ -119,6 +122,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 							log.Printf("Error sending message chunk: %v", err)
 						}
 					}
+				}
 
 				}
 
