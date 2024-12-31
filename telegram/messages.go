@@ -3,6 +3,7 @@ package telegram
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"google_genai/format"
 	"io"
@@ -13,6 +14,12 @@ import (
 	"path/filepath"
 	"strconv"
 )
+
+type TelegramError struct {
+	Ok          bool   `json:"ok"`
+	ErrorCode   int    `json:"error_code"`
+	Description string `json:"description"`
+}
 
 func (b *Bot) SendMessage(chatID int, text string) error {
 
@@ -51,8 +58,57 @@ func (b *Bot) SendLoadingMessage(chatID int, text string) (func(string), error) 
 		err := b.updateMessage(chatID, msg.MessageID, updatedText)
 		if err != nil {
 			log.Printf("Error updating message: %v", err)
+
+			var teleErr *TelegramError
+			if errors.As(err, &teleErr) {
+				switch teleErr.Description {
+				case "Bad Request: MESSAGE_TOO_LONG":
+					_ = b.updateMessage(chatID, msg.MessageID,
+						"Sorry, the response was too long for Telegram. Please try again.")
+				case "Bad Request: can't parse entities":
+					plainErr := b.updateMessageWithoutHTML(chatID, msg.MessageID, updatedText)
+					if plainErr != nil {
+						_ = b.updateMessage(chatID, msg.MessageID,
+							"Sorry, I encountered an error while formatting the message. Please try again.")
+					}
+				default:
+					_ = b.updateMessage(chatID, msg.MessageID,
+						fmt.Sprintf("Error: %s", teleErr.Description))
+				}
+				return
+			}
+
+			_ = b.updateMessage(chatID, msg.MessageID,
+				"An unexpected error occurred. Please try again.")
 		}
 	}, nil
+}
+
+func (b *Bot) updateMessageWithoutHTML(chatID int, messageID int, text string) error {
+	url := fmt.Sprintf("%s/editMessageText", b.APIBaseURL)
+
+	payload := map[string]interface{}{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"text":       text,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status: %s", resp.Status)
+	}
+
+	return nil
 }
 
 func (b *Bot) sendMessageAndGetID(chatID int, text string) (*Message, error) {
@@ -112,10 +168,19 @@ func (b *Bot) updateMessage(chatID int, messageID int, text string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		var teleErr TelegramError
+		if err := json.Unmarshal(bodyBytes, &teleErr); err != nil {
+			return fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		return &teleErr
 	}
 
 	return nil
+}
+
+func (e *TelegramError) Error() string {
+	return fmt.Sprintf("Telegram API Error %d: %s", e.ErrorCode, e.Description)
 }
 
 func (b *Bot) SendDocument(chatID int, filePath string) error {

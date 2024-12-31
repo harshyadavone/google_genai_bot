@@ -91,7 +91,7 @@ func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage fu
 	handleResponse(ctx, cs, h.bot, res, chatID, updateMessage)
 }
 
-func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, resp *genai.GenerateContentResponse, userId int, updateMessage func(updatedMessage string)) {
+func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, resp *genai.GenerateContentResponse, chatId int, updateMessage func(updatedMessage string)) {
 	if resp == nil {
 		return
 	}
@@ -106,18 +106,29 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 			case genai.Text:
 				if text := strings.TrimSpace(string(v)); text != "" {
 					fmt.Printf("1. Gemini: %s\n", text)
-					history := getOrCreateChatHistory(userId)
+					history := getOrCreateChatHistory(chatId)
 					history.AddMessage("model", v)
-					updateMessage(text)
+					// this is the place where i have to handle max lenghth
+					chunks := splitMessage(text, 4096)
+					if len(chunks) > 0 {
+						updateMessage(chunks[0])
+					}
+
+					for i := 1; i < len(chunks); i++ {
+						if err := bot.SendMessage(chatId, chunks[i]); err != nil {
+							log.Printf("Error sending message chunk: %v", err)
+						}
+					}
+
 				}
 
 			case genai.FunctionCall:
-				history := getOrCreateChatHistory(userId)
+				history := getOrCreateChatHistory(chatId)
 
 				toolFunc, err := getTool(v.Name)
 				if err != nil {
 					logWithTime("Error retrieving tool: %v\n", err)
-					sendToolError(ctx, cs, bot, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), userId, updateMessage)
+					sendToolError(ctx, cs, bot, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), chatId, updateMessage)
 					continue
 				}
 
@@ -126,7 +137,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				result, err := toolFunc(ctx, v)
 				if err != nil {
 					logWithTime("Error executing tool '%s': %v\n", v.Name, err)
-					sendToolError(ctx, cs, bot, v.Name, err.Error(), userId, updateMessage)
+					sendToolError(ctx, cs, bot, v.Name, err.Error(), chatId, updateMessage)
 					continue
 				}
 
@@ -135,7 +146,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				// WARN: update it...
 				if strings.HasPrefix(result, "File created successfully at") {
 					filePath := strings.TrimPrefix(result, "File created successfully at ")
-					err = bot.SendFileWithProgress(userId, filePath)
+					err = bot.SendFileWithProgress(chatId, filePath)
 					if err != nil {
 						logWithTime("Error sending file: %v\n", err)
 					}
@@ -157,7 +168,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				}
 
 				if hasNonEmptyContent(nextResp) {
-					handleResponse(ctx, cs, bot, nextResp, userId, updateMessage)
+					handleResponse(ctx, cs, bot, nextResp, chatId, updateMessage)
 				}
 
 			default:
@@ -167,7 +178,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 	}
 }
 
-func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, toolName, errorMsg string, userId int, updateMessage func(updateMessage string)) {
+func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, toolName, errorMsg string, chatId int, updateMessage func(updateMessage string)) {
 	resp, err := cs.SendMessage(ctx, genai.FunctionResponse{
 		Name: toolName,
 		Response: map[string]any{
@@ -176,7 +187,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, 
 	})
 
 	updateMessage(errorMsg)
-	history := getOrCreateChatHistory(userId)
+	history := getOrCreateChatHistory(chatId)
 
 	history.AddFunctionResponse(&genai.FunctionResponse{
 		Name: toolName,
@@ -190,7 +201,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, 
 		return
 	}
 
-	handleResponse(ctx, cs, bot, resp, userId, updateMessage)
+	handleResponse(ctx, cs, bot, resp, chatId, updateMessage)
 }
 
 // Print the response
@@ -202,6 +213,29 @@ func printResponse(resp *genai.GenerateContentResponse) {
 			}
 		}
 	}
+}
+
+func splitMessage(text string, maxLength int) []string {
+	var chunks []string
+
+	if len(text) > maxLength {
+		chunk := text[:maxLength]
+
+		lastSpace := strings.LastIndex(chunk, " ")
+
+		if lastSpace == -1 {
+			chunks = append(chunks, chunk)
+			text = text[maxLength:]
+		} else {
+			chunks = append(chunks, text[:lastSpace])
+			text = text[maxLength+1:]
+		}
+	}
+
+	if len(chunks) > 0 {
+		chunks = append(chunks, text)
+	}
+	return chunks
 }
 
 func hasNonEmptyContent(resp *genai.GenerateContentResponse) bool {

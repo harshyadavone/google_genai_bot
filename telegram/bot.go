@@ -27,6 +27,15 @@ Feel free to reach out anytime via [@harsh](https://t.me/harsh_693).
 Type **/help** at anytime to revisit this guide!
 `
 
+const privacyPolicy = `
+**🤖 Synapse Privacy Policy**
+
+* Synapse uses your chat ID and text to respond.
+
+* I temporarily store the last 10 messages for context,
+but no data is permanently saved.
+`
+
 type Bot struct {
 	Token      string
 	APIBaseURL string
@@ -76,6 +85,8 @@ func (b *Bot) HandleCommands(chatId int, text string) error {
 		b.SendMessage(chatId, "Welcome to Synapse AI chat bot")
 	case text == "/help":
 		b.SendMessage(chatId, helpGuide)
+	case text == "/privacy":
+		b.SendMessage(chatId, privacyPolicy)
 	case strings.HasPrefix(text, "/"):
 		b.SendMessage(chatId, "Not a vaild command. Type **/help** to see the list of available commands.")
 	}
