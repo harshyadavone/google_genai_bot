@@ -342,7 +342,7 @@ func scrapeWebPage(ctx context.Context, websiteLink string) *WebPageData {
 	// 	return websiteContent
 	// }
 
-	reader := io.LimitReader(res.Body, 2<<20) // 10 MB
+	reader := io.LimitReader(res.Body, 10<<20) // 10 MB
 
 	doc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
