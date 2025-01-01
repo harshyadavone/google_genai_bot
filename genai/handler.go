@@ -6,31 +6,125 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 )
 
 type Handler struct {
-	bot TelegramBot
+	bot             TelegramBot
+	processingState map[int]*ProcessingState
+	stateMutex      sync.RWMutex
+}
+
+type ProcessingState struct {
+	IsProcessing    bool
+	StartTime       time.Time
+	TimeoutDuration time.Duration
 }
 
 type TelegramBot interface {
 	SendMessage(chatID int, text string) error
+	SendLoadingMessage(chatID int, text string) (int, error)
+	// UpdateMessage(chatID int, messageID int, text string) error
+	HandleUpdateMessage(chatID int, messageID int, text string) error
 	SendFileWithProgress(chatID int, filepath string) error
+}
+
+type MessageWithID struct {
+	Text      string
+	MessageID int
 }
 
 func NewHandler(bot TelegramBot) *Handler {
 	return &Handler{
-		bot: bot,
+		bot:             bot,
+		stateMutex:      sync.RWMutex{},
+		processingState: make(map[int]*ProcessingState),
 	}
 }
 
-func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage func(updatedMessage string)) {
+func (h *Handler) tryAcquireProcessing(chatId int) bool {
+	h.stateMutex.Lock()
+	defer h.stateMutex.Unlock()
+
+	state, exists := h.processingState[chatId]
+	if !exists {
+		log.Printf("Creating new state for chat %d", chatId)
+
+		state = &ProcessingState{
+			TimeoutDuration: 2 * time.Minute,
+			IsProcessing:    false,
+		}
+		h.processingState[chatId] = state
+	}
+
+	if state.IsProcessing {
+		if time.Since(state.StartTime) > state.TimeoutDuration {
+			state.IsProcessing = false
+			log.Printf("Chat %d timed out, allowing new processing", chatId)
+			// goto DONE
+		} else {
+			log.Printf("Chat %d is busy", chatId)
+			return false
+		}
+	}
+
+	// DONE:
+	log.Printf("Starting processing for chat %d", chatId)
+	state.IsProcessing = true
+	state.StartTime = time.Now()
+	return true
+}
+
+func (h *Handler) releaseProcessing(chatId int) {
+	h.stateMutex.Lock()
+	defer h.stateMutex.Unlock()
+
+	if state, exists := h.processingState[chatId]; exists {
+		state.IsProcessing = false
+	}
+
+}
+
+func (h *Handler) startCleanupRoutine() {
+	ticker := time.NewTicker(time.Minute * 5)
+	for range ticker.C {
+		h.cleanup()
+	}
+}
+
+func (h *Handler) cleanup() {
+	h.stateMutex.Lock()
+	defer h.stateMutex.Unlock()
+
+	for chatId, state := range h.processingState {
+		if time.Since(state.StartTime) > state.TimeoutDuration*2 {
+			delete(h.processingState, chatId)
+		}
+	}
+}
+
+func (h *Handler) ProcessMessage(userMessage string, chatID int, messageId int) {
+	if !h.tryAcquireProcessing(chatID) {
+		h.bot.HandleUpdateMessage(chatID, messageId, "Please wait, processing previous request...")
+		return
+	}
+	defer h.releaseProcessing(chatID)
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in ProcessMessage: %v", r)
+			h.bot.HandleUpdateMessage(chatID, messageId, "An error occurred, please try again")
+		}
+	}()
 
 	ctx := context.Background()
-
 	ctx = context.WithValue(ctx, "chatId", chatID)
+
+	h.bot.HandleUpdateMessage(chatID, messageId, "Processing your request...")
 
 	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
 	if err != nil {
@@ -84,14 +178,14 @@ func (h *Handler) HandleMessage(userMessage string, chatID int, updateMessage fu
 
 	if err != nil {
 		logWithTime("Error sending message: %v", err)
-		updateMessage("something went wrong!, please try again after sometime.")
+		h.bot.HandleUpdateMessage(chatID, messageId, "something went wrong!, please try again after sometime.")
 		return
 	}
 
-	handleResponse(ctx, cs, h.bot, res, chatID, updateMessage)
+	handleResponse(ctx, cs, h.bot, res, chatID, messageId)
 }
 
-func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, resp *genai.GenerateContentResponse, chatId int, updateMessage func(updatedMessage string)) {
+func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, resp *genai.GenerateContentResponse, chatId int, messageId int) {
 	if resp == nil {
 		return
 	}
@@ -110,11 +204,11 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 					history.AddMessage("model", v)
 
 					if len(text) < 4096 {
-						updateMessage(text)
+						bot.HandleUpdateMessage(chatId, messageId, text)
 					} else {
 						chunks := splitMessage(text, 4096)
 						if len(chunks) > 0 {
-							updateMessage(chunks[0])
+							bot.HandleUpdateMessage(chatId, messageId, chunks[0])
 						}
 
 						for i := 1; i < len(chunks); i++ {
@@ -132,20 +226,23 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				toolFunc, err := getTool(v.Name)
 				if err != nil {
 					logWithTime("Error retrieving tool: %v\n", err)
-					sendToolError(ctx, cs, bot, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), chatId, updateMessage)
+					sendToolError(ctx, cs, bot, v.Name, fmt.Sprintf("Tool '%s' not found.", v.Name), chatId, messageId)
 					continue
 				}
 
 				history.AddFunctionCall(&v)
 
+				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("Executing %s", v.Name))
+
 				result, err := toolFunc(ctx, v)
 				if err != nil {
 					logWithTime("Error executing tool '%s': %v\n", v.Name, err)
-					sendToolError(ctx, cs, bot, v.Name, err.Error(), chatId, updateMessage)
+					sendToolError(ctx, cs, bot, v.Name, err.Error(), chatId, messageId)
 					continue
 				}
 
 				logWithTime("%s Function executed successfully", v.Name)
+				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("%s executed successfully", v.Name))
 
 				// WARN: update it...
 				if strings.HasPrefix(result, "File created successfully at") {
@@ -172,7 +269,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				}
 
 				if hasNonEmptyContent(nextResp) {
-					handleResponse(ctx, cs, bot, nextResp, chatId, updateMessage)
+					handleResponse(ctx, cs, bot, nextResp, chatId, messageId)
 				}
 
 			default:
@@ -182,7 +279,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 	}
 }
 
-func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, toolName, errorMsg string, chatId int, updateMessage func(updateMessage string)) {
+func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, toolName, errorMsg string, chatId int, messageId int) {
 	resp, err := cs.SendMessage(ctx, genai.FunctionResponse{
 		Name: toolName,
 		Response: map[string]any{
@@ -190,7 +287,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, 
 		},
 	})
 
-	updateMessage(errorMsg)
+	bot.HandleUpdateMessage(chatId, messageId, errorMsg)
 	history := getOrCreateChatHistory(chatId)
 
 	history.AddFunctionResponse(&genai.FunctionResponse{
@@ -205,7 +302,7 @@ func sendToolError(ctx context.Context, cs *genai.ChatSession, bot TelegramBot, 
 		return
 	}
 
-	handleResponse(ctx, cs, bot, resp, chatId, updateMessage)
+	handleResponse(ctx, cs, bot, resp, chatId, messageId)
 }
 
 // Print the response

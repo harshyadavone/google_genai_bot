@@ -48,40 +48,42 @@ func (b *Bot) SendMessage(chatID int, text string) error {
 	return nil
 }
 
-func (b *Bot) SendLoadingMessage(chatID int, text string) (func(string), error) {
-	msg, err := b.sendMessageAndGetID(chatID, text)
+func (b *Bot) SendLoadingMessage(chatID int, text string) (int, error) {
+	msg, err := b.SendMessageAndGetID(chatID, text)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
-	return func(updatedText string) {
-		err := b.updateMessage(chatID, msg.MessageID, updatedText)
-		if err != nil {
-			log.Printf("Error updating message: %v", err)
+	return msg.MessageID, nil
 
-			var teleErr *TelegramError
-			if errors.As(err, &teleErr) {
-				switch teleErr.Description {
-				case "Bad Request: MESSAGE_TOO_LONG":
-					_ = b.updateMessage(chatID, msg.MessageID,
-						"Sorry, the response was too long for Telegram. Please try again.")
-				case "Bad Request: can't parse entities":
-					plainErr := b.updateMessageWithoutHTML(chatID, msg.MessageID, updatedText)
-					if plainErr != nil {
-						_ = b.updateMessage(chatID, msg.MessageID,
-							"Sorry, I encountered an error while formatting the message. Please try again.")
-					}
-				default:
-					_ = b.updateMessage(chatID, msg.MessageID,
-						fmt.Sprintf("Error: %s", teleErr.Description))
-				}
-				return
-			}
-
-			_ = b.updateMessage(chatID, msg.MessageID,
-				"An unexpected error occurred. Please try again.")
-		}
-	}, nil
+	// return &msg.MessageID, func(messageId int, updatedText string) {
+	// 	err := b.updateMessage(chatID, messageId, updatedText)
+	// 	if err != nil {
+	// 		log.Printf("Error updating message: %v", err)
+	//
+	// 		var teleErr *TelegramError
+	// 		if errors.As(err, &teleErr) {
+	// 			switch teleErr.Description {
+	// 			case "Bad Request: MESSAGE_TOO_LONG":
+	// 				_ = b.updateMessage(chatID, messageId,
+	// 					"Sorry, the response was too long for Telegram. Please try again.")
+	// 			case "Bad Request: can't parse entities":
+	// 				plainErr := b.updateMessageWithoutHTML(chatID, messageId, updatedText)
+	// 				if plainErr != nil {
+	// 					_ = b.updateMessage(chatID, messageId,
+	// 						"Sorry, I encountered an error while formatting the message. Please try again.")
+	// 				}
+	// 			default:
+	// 				_ = b.updateMessage(chatID, messageId,
+	// 					fmt.Sprintf("Error: %s", teleErr.Description))
+	// 			}
+	// 			return
+	// 		}
+	//
+	// 		_ = b.updateMessage(chatID, messageId,
+	// 			"An unexpected error occurred. Please try again.")
+	// 	}
+	// }, nil
 }
 
 func (b *Bot) updateMessageWithoutHTML(chatID int, messageID int, text string) error {
@@ -111,7 +113,7 @@ func (b *Bot) updateMessageWithoutHTML(chatID int, messageID int, text string) e
 	return nil
 }
 
-func (b *Bot) sendMessageAndGetID(chatID int, text string) (*Message, error) {
+func (b *Bot) SendMessageAndGetID(chatID int, text string) (*Message, error) {
 	url := fmt.Sprintf("%s/sendMessage", b.APIBaseURL)
 
 	htmlText := format.ConvertToTelegramHTML(text)
@@ -145,7 +147,36 @@ func (b *Bot) sendMessageAndGetID(chatID int, text string) (*Message, error) {
 	return &result.Result, nil
 }
 
-func (b *Bot) updateMessage(chatID int, messageID int, text string) error {
+func (b *Bot) HandleUpdateMessage(chatID int, messageId int, text string) error {
+	err := b.UpdateMessage(chatID, messageId, text)
+	if err != nil {
+		log.Printf("Error updating message: %v", err)
+		var teleErr *TelegramError
+		if errors.As(err, &teleErr) {
+			switch teleErr.Description {
+			case "Bad Request: MESSAGE_TOO_LONG":
+				_ = b.UpdateMessage(chatID, messageId,
+					"Sorry, the response was too long for Telegram. Please try again.")
+			case "Bad Request: can't parse entities":
+				plainErr := b.updateMessageWithoutHTML(chatID, messageId, text)
+				if plainErr != nil {
+					_ = b.UpdateMessage(chatID, messageId,
+						"Sorry, I encountered an error while formatting the message. Please try again.")
+				}
+			default:
+				_ = b.UpdateMessage(chatID, messageId,
+					fmt.Sprintf("Error: %s", teleErr.Description))
+			}
+			return nil
+		}
+
+		_ = b.UpdateMessage(chatID, messageId,
+			"An unexpected error occurred. Please try again.")
+	}
+	return nil
+}
+
+func (b *Bot) UpdateMessage(chatID int, messageID int, text string) error {
 	url := fmt.Sprintf("%s/editMessageText", b.APIBaseURL)
 
 	htmlText := format.ConvertToTelegramHTML(text)
@@ -237,24 +268,23 @@ func (b *Bot) SendDocument(chatID int, filePath string) error {
 }
 
 func (b *Bot) SendFileWithProgress(chatID int, filePath string) error {
-	// Implementation...
 	if filePath == "" {
 		return fmt.Errorf("invalid file path")
 	}
 
-	msg, err := b.sendMessageAndGetID(chatID, "Preparing your file...")
+	msg, err := b.SendMessageAndGetID(chatID, "Preparing your file...")
 	if err != nil {
 		return fmt.Errorf("error sending initial message: %v", err)
 	}
 
-	err = b.updateMessage(chatID, msg.MessageID, "Uploading file...")
+	err = b.UpdateMessage(chatID, msg.MessageID, "Uploading file...")
 	if err != nil {
 		log.Printf("Error updating progress message: %v", err)
 	}
 
 	err = b.SendDocument(chatID, filePath)
 	if err != nil {
-		b.updateMessage(chatID, msg.MessageID, "Error sending file!")
+		b.UpdateMessage(chatID, msg.MessageID, "Error sending file!")
 		return fmt.Errorf("error sending document: %v", err)
 	}
 

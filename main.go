@@ -51,13 +51,14 @@ func main() {
 
 				log.Printf("ChatId: %d \nText: %s", chatID, text)
 
-				updateMessage, err := bot.SendLoadingMessage(chatID, "⏳")
-
+				messageId, err := bot.SendLoadingMessage(chatID, "⏳")
 				if err != nil {
 					log.Println("Error sending loading message:", err)
 				}
 
-				go genAIHandler.HandleMessage(text, chatID, updateMessage)
+				log.Printf("Loading message ID: %d", messageId)
+
+				go genAIHandler.ProcessMessage(text, chatID, messageId)
 			}
 		}
 
