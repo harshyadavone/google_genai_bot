@@ -22,7 +22,6 @@ type TelegramError struct {
 }
 
 func (b *Bot) SendMessage(chatID int, text string) error {
-
 	htmlText := format.ConvertToTelegramHTML(text)
 	reqBody := SendMessageRequest{
 		ChatID:    chatID,
@@ -42,9 +41,73 @@ func (b *Bot) SendMessage(chatID int, text string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		var teleErr TelegramError
+		if err := json.Unmarshal(bodyBytes, &teleErr); err != nil {
+			return fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		return &teleErr
 	}
+
+	return nil
+}
+
+func (b *Bot) HandleSendMessage(chatID int, text string) error {
+	err := b.SendMessage(chatID, text)
+	if err != nil {
+		log.Printf("Error sending message: %v", err)
+
+		var teleErr *TelegramError
+		if errors.As(err, &teleErr) {
+			switch teleErr.Description {
+			case "Bad Request: MESSAGE_TOO_LONG":
+				return b.SendMessage(chatID,
+					"Sorry, the message was too long for Telegram. Please try again.")
+			case "Bad Request: can't parse entities":
+				plainErr := b.sendMessageWithoutHTML(chatID, text)
+				if plainErr != nil {
+					return b.SendMessage(chatID,
+						"Sorry, I encountered an error while formatting the message. Please try again.")
+				}
+				return nil
+			default:
+				return b.SendMessage(chatID,
+					fmt.Sprintf("Error: %s", teleErr.Description))
+			}
+		}
+
+		return b.SendMessage(chatID,
+			"An unexpected error occurred. Please try again.")
+	}
+	return nil
+}
+
+func (b *Bot) sendMessageWithoutHTML(chatID int, text string) error {
+	reqBody := SendMessageRequest{
+		ChatID: chatID,
+		Text:   text,
+	}
+
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(b.APIBaseURL+"/sendMessage", "application/json", bytes.NewBuffer(reqBytes))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		var teleErr TelegramError
+		if err := json.Unmarshal(bodyBytes, &teleErr); err != nil {
+			return fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		return &teleErr
+	}
+
 	return nil
 }
 
