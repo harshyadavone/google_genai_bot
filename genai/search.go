@@ -148,7 +148,7 @@ func webSearch(ctx context.Context, funCall genai.FunctionCall) (string, error) 
 
 	if extractWebsites {
 		var links []string
-		for _, v := range results {
+		for _, v := range results[:5] {
 			links = append(links, v.Link)
 		}
 
