@@ -252,10 +252,14 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 					}
 				}
 
+				startTime := time.Now()
+
 				nextResp, err := cs.SendMessage(ctx, genai.FunctionResponse{
 					Name:     v.Name,
 					Response: map[string]any{"function response: ": result},
 				})
+
+				log.Printf("Time taken by gemini: %d", time.Since(startTime))
 
 				history.AddFunctionResponse(&genai.FunctionResponse{
 					Name:     v.Name,
