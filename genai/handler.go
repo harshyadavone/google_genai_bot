@@ -245,7 +245,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 
 				logWithTime("%s Function executed successfully", v.Name)
 				toolExecutionTime := time.Since(toolStartTime).Round(time.Millisecond)
-				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("'%s' execution completed in %v. Processing results...", v.Name, toolExecutionTime))
+				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("%s execution completed in %v. Processing results...", v.Name, toolExecutionTime))
 
 				// WARN: update it...
 				if strings.HasPrefix(result, "File created successfully at") {
