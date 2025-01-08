@@ -203,8 +203,10 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 					history.AddMessage("model", v)
 
 					if len(text) < 4096 {
+						log.Println("Character length under 4096")
 						bot.HandleUpdateMessage(chatId, messageId, text)
 					} else {
+						log.Println("Character length above 4096")
 						chunks := splitMessage(text, 4096)
 						if len(chunks) > 0 {
 							bot.HandleUpdateMessage(chatId, messageId, chunks[0])
@@ -233,6 +235,7 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 
 				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("Executing %s", v.Name))
 
+				toolStartTime := time.Now()
 				result, err := toolFunc(ctx, v)
 				if err != nil {
 					logWithTime("Error executing tool '%s': %v\n", v.Name, err)
@@ -241,7 +244,8 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 				}
 
 				logWithTime("%s Function executed successfully", v.Name)
-				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("%s executed successfully", v.Name))
+				toolExecutionTime := time.Since(toolStartTime).Round(time.Millisecond)
+				bot.HandleUpdateMessage(chatId, messageId, fmt.Sprintf("'%s' execution completed in %v. Processing results...", v.Name, toolExecutionTime))
 
 				// WARN: update it...
 				if strings.HasPrefix(result, "File created successfully at") {
@@ -252,14 +256,16 @@ func handleResponse(ctx context.Context, cs *genai.ChatSession, bot TelegramBot,
 					}
 				}
 
-				startTime := time.Now()
+				geminiStartTime := time.Now()
 
 				nextResp, err := cs.SendMessage(ctx, genai.FunctionResponse{
 					Name:     v.Name,
 					Response: map[string]any{"function response: ": result},
 				})
 
-				log.Printf("Time taken by gemini: %d", time.Since(startTime))
+				geminiProcessingTime := time.Since(geminiStartTime).Round(time.Millisecond)
+
+				logWithTime("Gemini processing completed in %v", geminiProcessingTime)
 
 				history.AddFunctionResponse(&genai.FunctionResponse{
 					Name:     v.Name,
