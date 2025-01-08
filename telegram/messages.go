@@ -60,7 +60,7 @@ func (b *Bot) HandleSendMessage(chatID int, text string) error {
 		var teleErr *TelegramError
 		if errors.As(err, &teleErr) {
 			switch teleErr.Description {
-			case "Bad Request: MESSAGE_TOO_LONG":
+			case "Bad Request: message is too long":
 				return b.SendMessage(chatID,
 					"Sorry, the message was too long for Telegram. Please try again.")
 			case "Bad Request: can't parse entities":
